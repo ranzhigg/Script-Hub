@@ -141,6 +141,19 @@ test('Loon v2 cron preserves dynamic cron and timeout parameters', async () => {
   assert.match(body, /\{\{\{cron_enabled\}\}\}/)
 })
 
+test('Loon argument options are preserved in Surge arguments-desc', async () => {
+  const { body } = await convert(
+    [
+      'blockUpload=switch, false, true, tag=隐藏上传按钮, desc=用于隐藏YouTube底栏的上传按钮',
+      'captionLang=select, zh-Hans, zh-Hant, tag=字幕语言, desc=字幕语言',
+    ].join('\n'),
+    'surge-module'
+  )
+  assert.match(body, /#!arguments=blockUpload:false,captionLang:zh-Hans/)
+  assert.match(body, /blockUpload: 隐藏上传按钮\\n用于隐藏YouTube底栏的上传按钮\\n可选值: false, true/)
+  assert.match(body, /captionLang: 字幕语言\\n字幕语言\\n可选值: zh-Hans, zh-Hant/)
+})
+
 test('Loon v2 network-changed maps to a Surge event script', async () => {
   const { body } = await convert(
     'network-changed then script("https://example.com/network.js") with tag="Network"',
