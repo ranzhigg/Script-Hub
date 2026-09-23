@@ -1536,6 +1536,7 @@ if (binaryInfo != null && binaryInfo.length > 0) {
             ? 'event'
             : jstype
       jsurl = jsBox[i].jsurl
+      const hasRequiresBodyOption = jsBox[i].rebody !== '' && jsBox[i].rebody != null
       rebody = jsBox[i].rebody ? istrue(jsBox[i].rebody) : ''
       proto = jsBox[i].proto ? istrue(jsBox[i].proto) : ''
       engine = jsBox[i].engine ? jsBox[i].engine : ''
@@ -1570,6 +1571,12 @@ if (binaryInfo != null && binaryInfo.length > 0) {
       engine = reJsValue(enginet || 'null', enginev, jsname, ori, engine)
       jsenable = normalizeTemplateValue(jsenable, targetApp)
       scriptPrefix = isSurgeiOS || isShadowrocket ? getSurgeRuleTogglePrefix(jsenable) : ''
+
+      // 旧式 Script 行也可能携带 WASM 所需的 binary-body-mode；给 Surge 补齐 body 缓冲和 WebView 引擎。
+      if (isSurgeiOS && proto === true && /request|response/.test(jstype)) {
+        if (!hasRequiresBodyOption) rebody = true
+        if (!engine) engine = 'webview'
+      }
 
       switch (targetApp) {
         case 'surge-module':
@@ -2229,6 +2236,12 @@ function normalizeLoonV2Timeout(value, targetApp) {
   return scalar
 }
 
+function normalizeLoonV2Engine(value) {
+  const raw = unwrapLoonV2String(`${value ?? ''}`.trim())
+  if (raw == null || !/^(auto|jsc|webview)$/i.test(raw)) return null
+  return raw.toLowerCase()
+}
+
 function normalizeLoonV2Argument(value) {
   const raw = `${value ?? ''}`.trim()
   if (!raw) return ''
@@ -2314,6 +2327,9 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
 
   const warnings = []
   const legacyOptions = []
+  let hasBinaryBodyMode = false
+  let hasRequiresBody = false
+  let hasExplicitEngine = false
   for (const option of parsedOptions.options) {
     const { key, value } = option
     if (key === 'tag') {
@@ -2329,6 +2345,15 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
       const timeout = normalizeLoonV2Timeout(value, targetApp)
       if (timeout == null) return { unsupported: true, reason: 'timeout 必须是正数或动态数字参数' }
       legacyOptions.push(`timeout=${timeout}`)
+    } else if (key === 'engine') {
+      const engine = normalizeLoonV2Engine(value)
+      if (engine == null) return { unsupported: true, reason: 'engine 只支持 auto、jsc 或 webview' }
+      if (targetApp === 'surge-module') {
+        legacyOptions.push(`engine=${engine}`)
+        hasExplicitEngine = true
+      } else {
+        warnings.push(`engine=${engine} 已忽略：目标应用不支持 Surge engine 选项`)
+      }
     } else if (key === 'enable') {
       const enable = normalizeLoonV2Boolean(value, targetApp)
       if (enable == null) return { unsupported: true, reason: 'enable 必须是 Boolean 或动态 Boolean 参数' }
@@ -2347,8 +2372,22 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
       const flag = normalizeLoonV2Boolean(value, targetApp)
       if (flag == null) return { unsupported: true, reason: `${key} 必须是 Boolean` }
       legacyOptions.push(`${key === 'requires_body' ? 'requires-body' : 'binary-body-mode'}=${flag}`)
+      if (key === 'requires_body') hasRequiresBody = true
+      if (key === 'binary_body_mode') hasBinaryBodyMode = flag === 'true'
     } else {
       return { unsupported: true, reason: `暂不支持 with 字段：${key}` }
+    }
+  }
+
+  // Surge 需要先缓存完整响应体才能读取二进制数据；WebView 对 WASM 和大体积脚本更稳妥。
+  if (targetApp === 'surge-module' && hasBinaryBodyMode) {
+    if (!hasRequiresBody) {
+      legacyOptions.push('requires-body=true')
+      warnings.push('binary_body_mode=true 已自动补 requires-body=true')
+    }
+    if (!hasExplicitEngine) {
+      legacyOptions.push('engine=webview')
+      warnings.push('binary_body_mode=true 已自动使用 engine=webview，适合 WASM/复杂二进制脚本')
     }
   }
 
