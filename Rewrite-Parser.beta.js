@@ -262,6 +262,7 @@ let surgeRuleToggleArgs = new Map() //Surge 用行首 # 注释控制脚本启停
 let argumentKeyRenameMap = new Map() //Surge 模板参数名 -> 脚本实际读取的 $argument key
 let loonV2Warnings = [] //Loon v2 转换时无法完全表达的能力
 let loonV2NormalizedLines = new Set() //已归一化的 Loon v2 行，用于保留可转换的 Generic Script
+let loonV2NativeLines = [] //目标仍为 Loon 时保留原生 v2 语法，避免丢失组合条件
 
 let hnaddMethod = '%APPEND%'
 let fheaddMethod = '%APPEND%'
@@ -291,7 +292,7 @@ let providers = []
 hnBox = hnAdd != null ? hnAdd : []
 
 const jsRegex =
-  /\s*[=,]\s*(?:script-path|pattern|timeout|argument|script-update-interval|requires-body|max-size|ability|binary-body-mode|cronexpr?|wake-system|enabled?|engine|tag|type|img-url|debug|event-name|desc)\s*=\s*/
+  /\s*[=,]\s*(?:script-path|pattern|timeout|argument|script-update-interval|requires-body|max-size|ability|binary-body-mode|cronexpr?|wake-system|enabled?|engine|tag|type|img-url|icon|debug|event-name|desc)\s*=\s*/
 
 const panelRegex = /\s*[=,]\s*(?:title|content|style|script-name|update-interval)\s*=\s*/
 
@@ -398,11 +399,16 @@ if (binaryInfo != null && binaryInfo.length > 0) {
       x = ''
     }
 
-    // Loon 3.5.1+ 的 Script v2 先归一化为旧脚本格式，复用现有跨平台解析器。
-    // 输出到 Loon 时保留原始新语法，避免新旧语法之间来回转换造成信息损失。
-    if (!isLooniOS && (fromType === 'loon-plugin' || fromType === 'all-module')) {
+    // Loon 3.5.1+ 的 Script v2 在转换到其他应用时归一化为内部旧脚本格式，复用现有跨平台输出器。
+    // 目标仍为 Loon 时直接保留原生 v2 行，避免丢失 method/status/header 等 Loon 专属组合条件。
+    if (fromType === 'loon-plugin' || fromType === 'all-module') {
+      const loonV2Candidate = /^(request|response|cron|network-changed|generic)\b[\s\S]*\bthen\s+script\s*\(/i.test(x)
+      if (loonV2Candidate && isLooniOS) {
+        loonV2NativeLines.push({ line: x, num: y })
+        continue
+      }
       const loonV2 = normalizeLoonV2ScriptLine(x, targetApp)
-      if (loonV2?.unsupported) {
+      if (loonV2Candidate && loonV2?.unsupported) {
         otherRule.push(`${_x} [Loon v2: ${loonV2.reason}]`)
         continue
       }
@@ -874,7 +880,7 @@ if (binaryInfo != null && binaryInfo.length > 0) {
       getTemplateKeys(jsenable).forEach(key => surgeRuleToggleArgs.set(key, true))
       updatetime = getJsInfo(x, /[=,\s]\s*script-update-interval\s*=\s*/)
       timeout = getJsInfo(x, /[=,\s]\s*timeout\s*=\s*/)
-      tilesicon = jstype == 'generic' && /icon=/.test(x) ? x.split('icon=')[1].split('&')[0] : ''
+      tilesicon = jstype == 'generic' ? getJsInfo(x, /[=,\s]\s*icon\s*=\s*/, jsRegex) : ''
       tilescolor = jstype == 'generic' && /icon-color=/.test(x) ? x.split('icon-color=')[1].split('&')[0] : '#5d84f8'
       if (nCron != null && jstype != 'cron') {
         for (let i = 0; i < nCron.length; i++) {
@@ -884,6 +890,7 @@ if (binaryInfo != null && binaryInfo.length > 0) {
             jsBox.push({
               mark,
               noteK,
+              loonV2: loonV2NormalizedLines.has(x),
               jsname,
               img,
               jstype: 'cron',
@@ -906,6 +913,7 @@ if (binaryInfo != null && binaryInfo.length > 0) {
         jsBox.push({
           mark,
           noteK,
+          loonV2: loonV2NormalizedLines.has(x),
           jsname,
           img,
           jstype,
@@ -1517,8 +1525,21 @@ if (binaryInfo != null && binaryInfo.length > 0) {
   } //panel输出结束
 
   //脚本输出
+  let loonV2NativeIndex = 0
+  const appendLoonV2NativeBefore = sourceNum => {
+    if (!isLooniOS) return
+    while (
+      loonV2NativeIndex < loonV2NativeLines.length &&
+      loonV2NativeLines[loonV2NativeIndex].num < sourceNum
+    ) {
+      script.push(loonV2NativeLines[loonV2NativeIndex].line)
+      loonV2NativeIndex++
+    }
+  }
+
   if (!isStashiOS && jsBox.length > 0) {
     for (let i = 0; i < jsBox.length; i++) {
+      appendLoonV2NativeBefore(jsBox[i].num)
       noteK = jsBox[i].noteK ? '#' : ''
       mark = jsBox[i].mark ? jsBox[i].mark : ''
       jstype = jsBox[i].jstype
@@ -1572,8 +1593,9 @@ if (binaryInfo != null && binaryInfo.length > 0) {
       jsenable = normalizeTemplateValue(jsenable, targetApp)
       scriptPrefix = isSurgeiOS || isShadowrocket ? getSurgeRuleTogglePrefix(jsenable) : ''
 
-      // 旧式 Script 行也可能携带 WASM 所需的 binary-body-mode；给 Surge 补齐 body 缓冲和 WebView 引擎。
-      if (isSurgeiOS && proto === true && /request|response/.test(jstype)) {
+      // 旧式 Script 行历史上常把 binary-body-mode 用作“读取完整 body”的隐含标记。
+      // Loon v2 则明确区分两个参数，必须保留其显式语义，不在这里猜测。
+      if (isSurgeiOS && proto === true && /request|response/.test(jstype) && !jsBox[i].loonV2) {
         if (!hasRequiresBodyOption) rebody = true
         if (!engine) engine = 'webview'
       }
@@ -1713,6 +1735,15 @@ if (binaryInfo != null && binaryInfo.length > 0) {
     } //脚本输出for
   } //不是Stash的脚本输出
 
+  // Loon 目标保留原生 Script v2，确保官方支持的复合条件和 with 选项不被旧语法截断。
+  // 同时把它插回源文件相对位置，避免与旧式 Script 混排时改变匹配顺序。
+  if (isLooniOS) {
+    while (loonV2NativeIndex < loonV2NativeLines.length) {
+      script.push(loonV2NativeLines[loonV2NativeIndex].line)
+      loonV2NativeIndex++
+    }
+  }
+
   if (isStashiOS && jsBox.length > 0) {
     //处理脚本名字
     let urlMap = {}
@@ -1729,7 +1760,11 @@ if (binaryInfo != null && binaryInfo.length > 0) {
     }
 
     for (let i = 0; i < jsBox.length; i++) {
-      if (jsBox[i].noteK != '#') {
+      const stashEnable = `${jsBox[i].jsenable ?? ''}`.trim()
+      const stashDynamicEnable = jsBox[i].loonV2 && stashEnable && !/^(true|false)$/i.test(stashEnable)
+      const stashDisabled = /^(false|0|off|no)$/i.test(stashEnable) || stashDynamicEnable
+      const stashCommented = jsBox[i].noteK == '#' || stashDisabled
+      if (!stashCommented) {
         noteKn8 = '\n        '
         noteKn6 = '\n      '
         noteKn4 = '\n    '
@@ -1804,24 +1839,32 @@ if (binaryInfo != null && binaryInfo.length > 0) {
             timeout +
             jsarg
         )
-        providers.push(`${noteK2}"` + jsname + '":' + `${noteKn4}url: ` + jsurl + `${noteKn4}interval: 86400`)
+        if (!stashDisabled) {
+          providers.push(`${noteK2}"` + jsname + '":' + `${noteKn4}url: ` + jsurl + `${noteKn4}interval: 86400`)
+        }
       }
       if (jstype == 'cron') {
         cron.push(mark + `${noteK4}- name: "` + jsname + `"${noteKn6}cron: ` + cronexp + `${timeout}` + jsarg)
-        providers.push(`${noteK2}"` + jsname + '":' + `${noteKn4}url: ` + jsurl + `${noteKn4}interval: 86400`)
+        if (!stashDisabled) {
+          providers.push(`${noteK2}"` + jsname + '":' + `${noteKn4}url: ` + jsurl + `${noteKn4}interval: 86400`)
+        }
       }
       if (jstype == 'generic') {
-        ;/^generic\s/.test(ori)
+        ;/^generic\s/.test(ori) && !loonV2NormalizedLines.has(ori)
           ? otherRule.push(ori)
           : tiles.push(
               mark +
                 `${noteK2}- name: "${jsname}"${noteKn4}interval: 3600${noteKn4}title: "${jsname}"${noteKn4}icon: "${tilesicon}"${noteKn4}backgroundColor: "${tilescolor}"${timeout}${jsarg}`
             )
-        ;/^generic\s/.test(ori)
+        ;/^generic\s/.test(ori) && !loonV2NormalizedLines.has(ori)
           ? ''
-          : providers.push(`${noteK2}"${jsname}":${noteKn4}url: ${jsurl}${noteKn4}interval: 86400`)
+          : !stashDisabled && providers.push(`${noteK2}"${jsname}":${noteKn4}url: ${jsurl}${noteKn4}interval: 86400`)
       }
-      ;/network-changed|event|rule|dns/i.test(jstype) && otherRule.push(ori)
+      if (/network-changed|event|rule|dns/i.test(jstype)) {
+        otherRule.push(
+          jsBox[i].loonV2 ? `${ori} [Loon v2: Stash 不支持该触发器]` : ori
+        )
+      }
     } //for循环
   } //是Stash的脚本输出
 
@@ -1971,6 +2014,10 @@ ${providers}
       break
   } //输出内容结束
   body = body.replace(/\n{2,}/g, '\n\n')
+  const surgeTemplateKeys =
+    isSurgeiOS || isShadowrocket
+      ? new Set([...body.matchAll(/\{\{\{([^{}]+)\}\}\}/g)].map(item => item[1].trim()).filter(Boolean))
+      : new Set()
   if (isStashiOS && sgArg.length > 0) {
     body = body.replaceAll('{{{', '{').replaceAll('}}}', '}')
     for (let i = 0; i < sgArg.length; i++) {
@@ -1985,6 +2032,9 @@ ${providers}
       let r = '{{{' + sgArg[i].key + '}}}'
       body = body.replaceAll(e, r)
     } //for
+    for (const key of surgeTemplateKeys) {
+      body = body.replaceAll('{' + key + '}', '{{{' + key + '}}}')
+    }
   } else if (isLooniOS) {
     body = body.replaceAll('{{{', '{').replaceAll('}}}', '}')
   }
@@ -2162,14 +2212,90 @@ function splitFirstLoonV2TopLevel(str, sep) {
   return [parts[0] || '', parts.slice(1).join(sep).trim()]
 }
 
+function findLoonV2MatchingParen(str, openIndex) {
+  let quote = ''
+  let regex = false
+  let escaped = false
+  let depth = 0
+  for (let i = openIndex; i < str.length; i++) {
+    const char = str[i]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === quote) {
+        quote = ''
+      }
+      continue
+    }
+    if (regex) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '/') {
+        regex = false
+      }
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char
+      continue
+    }
+    if (char === '/' && /(?:~=|==|!=)\s*$/.test(str.slice(0, i))) {
+      regex = true
+      continue
+    }
+    if (char === '(') {
+      depth++
+    } else if (char === ')') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+function stripLoonV2OuterParentheses(value) {
+  let result = `${value ?? ''}`.trim()
+  while (result.startsWith('(')) {
+    const closing = findLoonV2MatchingParen(result, 0)
+    if (closing !== result.length - 1) break
+    result = result.slice(1, -1).trim()
+  }
+  return result
+}
+
 function unwrapLoonV2String(value) {
   const raw = `${value ?? ''}`.trim()
   if (raw.length < 2) return null
   const quote = raw[0]
   if (!['"', "'", '`'].includes(quote) || raw[raw.length - 1] !== quote) return null
-  return raw
-    .slice(1, -1)
+  const body = raw.slice(1, -1)
+
+  // 双引号字符串遵循 JSON 转义；Loon 的单引号字符串兼容常见的 JS 转义。
+  if (quote === '"') {
+    try {
+      return JSON.parse(raw)
+    } catch (e) {
+      return null
+    }
+  }
+  if (quote === '`') return body
+  return body
     .replace(/\\(["'`\\])/g, '$1')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+}
+
+function readLoonV2FixedString(value, field, allowComma = false) {
+  const result = unwrapLoonV2String(`${value ?? ''}`.trim())
+  if (result == null) return { reason: `${field} 必须是固定字符串` }
+  if (/[\r\n]/.test(result)) return { reason: `${field} 不能包含换行` }
+  if (!allowComma && result.includes(',')) return { reason: `${field} 不能包含逗号，旧格式无法无损表示` }
+  return { value: result }
 }
 
 function readLoonV2Regex(value) {
@@ -2193,15 +2319,15 @@ function readLoonV2Regex(value) {
   if (closing === -1) return { reason: 'URL 正则缺少结束分隔符 /' }
 
   const pattern = raw.slice(1, closing)
-  const flags = raw.slice(closing + 1)
-  if (/\s+(?:&&|\|\|)\s+/.test(flags)) {
+  const flags = raw.slice(closing + 1).trim()
+  if (/[&|]|\$\{/.test(flags)) {
     return { reason: 'URL 条件包含方法、状态码、Header 或额外逻辑条件，当前无法等价转换' }
   }
   if (!/^[ims]*$/.test(flags) || new Set(flags).size !== flags.length) {
     return { reason: '仅支持 Loon v2 的 i、m、s 正则标记' }
   }
-  if (/[\r\n]/.test(pattern) || /[ \t]/.test(pattern)) {
-    return { reason: 'URL 正则包含空格，当前旧格式解析器无法安全承载' }
+  if (/[\r\n]/.test(pattern)) {
+    return { reason: 'URL 正则不能跨行，当前旧格式解析器按行解析' }
   }
 
   const modifiers = flags
@@ -2232,14 +2358,9 @@ function normalizeLoonV2Timeout(value, targetApp) {
   const template = normalizeLoonV2Template(raw, targetApp)
   if (template) return template
   const scalar = unwrapLoonV2String(raw) ?? raw
-  if (!/^\d+(?:\.\d+)?$/.test(scalar) || Number(scalar) <= 0) return null
+  if (!/^\+?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?$/i.test(scalar)) return null
+  if (!Number.isFinite(Number(scalar)) || Number(scalar) <= 0) return null
   return scalar
-}
-
-function normalizeLoonV2Engine(value) {
-  const raw = unwrapLoonV2String(`${value ?? ''}`.trim())
-  if (raw == null || !/^(auto|jsc|webview)$/i.test(raw)) return null
-  return raw.toLowerCase()
 }
 
 function normalizeLoonV2Argument(value) {
@@ -2262,19 +2383,36 @@ function normalizeLoonV2Argument(value) {
 }
 
 function parseLoonV2UrlCondition(condition) {
-  const matched = `${condition ?? ''}`.trim().match(/^\$\{\s*url\s*\}\s*~=\s*([\s\S]+)$/)
-  if (!matched) return { reason: '目前只转换单一 ${url} ~= /正则/ 条件' }
-  return readLoonV2Regex(matched[1])
+  const source = stripLoonV2OuterParentheses(condition)
+  const regexMatched = source.match(/^\$\{\s*url\s*\}\s*~=\s*([\s\S]+)$/i)
+  if (regexMatched) return readLoonV2Regex(regexMatched[1])
+
+  const equalMatched = source.match(/^\$\{\s*url\s*\}\s*==\s*([\s\S]+)$/i)
+  if (equalMatched) {
+    const url = unwrapLoonV2String(equalMatched[1])
+    if (url == null) return { reason: 'URL 等值条件右值必须是字符串' }
+    if (!url || /[\r\n]/.test(url)) return { reason: 'URL 等值条件不能是空字符串或跨行字符串' }
+    const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return { pattern: `^${escaped}$` }
+  }
+
+  return { reason: '当前只转换单一 ${url} ~= /正则/ 或 ${url} == "URL" 条件' }
 }
 
 function parseLoonV2Options(value) {
   const options = []
   const seen = new Set()
-  for (const item of splitLoonV2TopLevel(`${value ?? ''}`)) {
-    if (!item) continue
+  const source = `${value ?? ''}`.trim()
+  if (!source) return { options }
+
+  const parts = splitLoonV2TopLevel(source)
+  if (parts.some(item => !item)) return { reason: 'with 选项不能有空字段或尾随逗号' }
+  for (const item of parts) {
     const [rawKey, rawValue] = splitFirstLoonV2TopLevel(item, '=')
     const key = rawKey.trim()
-    if (!key || !rawValue || seen.has(key)) return { reason: `with 中的字段无效或重复：${key || item}` }
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key) || !rawValue || seen.has(key)) {
+      return { reason: `with 中的字段无效或重复：${key || item}` }
+    }
     seen.add(key)
     options.push({ key, value: rawValue.trim() })
   }
@@ -2292,8 +2430,11 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
   // 没有 v2 Action 的旧语法交给原有解析器处理。
   if (!actionMatch) return null
 
-  if (type === 'generic' && targetApp !== 'surge-module') {
-    return { unsupported: true, reason: '当前仅实现 Surge Generic Script 输出' }
+  if (!['surge-module', 'shadowrocket-module', 'loon-plugin', 'stash-stoverride'].includes(targetApp)) {
+    return { unsupported: true, reason: `当前目标不支持 Loon v2 转换：${targetApp || '未知目标'}` }
+  }
+  if (type === 'generic' && targetApp === 'shadowrocket-module') {
+    return { unsupported: true, reason: 'Shadowrocket 没有 Generic/Tile Script 等价输出' }
   }
 
   const openIndex = source.indexOf('(', actionMatch.index)
@@ -2305,16 +2446,18 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
   if (tail && !/^with\b/i.test(tail)) {
     return { unsupported: true, reason: 'script(...) 后存在无法识别的内容' }
   }
+  if (/^with\s*$/i.test(tail)) return { unsupported: true, reason: 'with 后缺少选项' }
 
   const actionParts = splitLoonV2TopLevel(source.slice(openIndex + 1, closeIndex))
   if (actionParts.length > 2 || !actionParts[0]) {
     return { unsupported: true, reason: 'script(...) 只支持固定脚本路径和一个可选参数' }
   }
 
-  const jsurl = unwrapLoonV2String(actionParts[0])
-  if (jsurl == null || !jsurl.trim()) {
-    return { unsupported: true, reason: '脚本路径必须是固定字符串' }
+  const jsurlResult = readLoonV2FixedString(actionParts[0], '脚本路径')
+  if (jsurlResult.reason || !jsurlResult.value.trim()) {
+    return { unsupported: true, reason: jsurlResult.reason || '脚本路径必须是非空固定字符串' }
   }
+  const jsurl = jsurlResult.value
 
   const jsarg = actionParts.length === 2 ? normalizeLoonV2Argument(actionParts[1]) : ''
   if (jsarg == null) {
@@ -2329,35 +2472,39 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
   const legacyOptions = []
   let hasBinaryBodyMode = false
   let hasRequiresBody = false
-  let hasExplicitEngine = false
   for (const option of parsedOptions.options) {
     const { key, value } = option
     if (key === 'tag') {
-      const tag = unwrapLoonV2String(value)
-      if (tag == null) return { unsupported: true, reason: 'tag 必须是固定字符串' }
-      legacyOptions.push(`tag=${tag}`)
+      const tag = readLoonV2FixedString(value, 'tag')
+      if (tag.reason) return { unsupported: true, reason: tag.reason }
+      legacyOptions.push(`tag=${tag.value}`)
     } else if (key === 'img_url') {
-      const imgUrl = unwrapLoonV2String(value)
-      if (imgUrl == null) return { unsupported: true, reason: 'img_url 必须是固定字符串' }
-      legacyOptions.push(`img-url=${imgUrl}`)
-      warnings.push(`img_url 在 ${targetApp} 输出中没有对应字段，已忽略`)
+      const imgUrl = readLoonV2FixedString(value, 'img_url', targetApp !== 'loon-plugin')
+      if (imgUrl.reason) return { unsupported: true, reason: imgUrl.reason }
+      if (targetApp === 'loon-plugin') {
+        legacyOptions.push(`img-url=${imgUrl.value}`)
+      } else if (targetApp === 'stash-stoverride' && type === 'generic') {
+        if (/[&]/.test(imgUrl.value)) {
+          return { unsupported: true, reason: 'img_url 用作 Stash Tile icon 时不能包含未编码的 &' }
+        }
+        legacyOptions.push(`icon=${imgUrl.value}`)
+        warnings.push('img_url 已映射为 Stash Tile 的 icon')
+      } else {
+        warnings.push(`img_url 在 ${targetApp} 输出中没有对应字段，已忽略`)
+      }
     } else if (key === 'timeout') {
       const timeout = normalizeLoonV2Timeout(value, targetApp)
       if (timeout == null) return { unsupported: true, reason: 'timeout 必须是正数或动态数字参数' }
       legacyOptions.push(`timeout=${timeout}`)
-    } else if (key === 'engine') {
-      const engine = normalizeLoonV2Engine(value)
-      if (engine == null) return { unsupported: true, reason: 'engine 只支持 auto、jsc 或 webview' }
-      if (targetApp === 'surge-module') {
-        legacyOptions.push(`engine=${engine}`)
-        hasExplicitEngine = true
-      } else {
-        warnings.push(`engine=${engine} 已忽略：目标应用不支持 Surge engine 选项`)
-      }
     } else if (key === 'enable') {
       const enable = normalizeLoonV2Boolean(value, targetApp)
       if (enable == null) return { unsupported: true, reason: 'enable 必须是 Boolean 或动态 Boolean 参数' }
       legacyOptions.push(`enable=${enable}`)
+      if (targetApp === 'stash-stoverride' && !/^(true|false)$/i.test(enable)) {
+        warnings.push('Stash 不支持动态 enable，已将对应脚本转换为注释')
+      } else if (targetApp === 'stash-stoverride' && enable === 'false') {
+        warnings.push('Stash 不支持 enable=false，已将对应脚本转换为注释')
+      }
     } else if (key === 'debug') {
       const debug = normalizeLoonV2Boolean(value, targetApp)
       if (debug == null) return { unsupported: true, reason: 'debug 必须是 Boolean 或动态 Boolean 参数' }
@@ -2379,16 +2526,9 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
     }
   }
 
-  // Surge 需要先缓存完整响应体才能读取二进制数据；WebView 对 WASM 和大体积脚本更稳妥。
-  if (targetApp === 'surge-module' && hasBinaryBodyMode) {
-    if (!hasRequiresBody) {
-      legacyOptions.push('requires-body=true')
-      warnings.push('binary_body_mode=true 已自动补 requires-body=true')
-    }
-    if (!hasExplicitEngine) {
-      legacyOptions.push('engine=webview')
-      warnings.push('binary_body_mode=true 已自动使用 engine=webview，适合 WASM/复杂二进制脚本')
-    }
+  // Loon v2 明确区分 binary_body_mode 与 requires_body，转换时不能凭二进制模式猜测脚本是否需要完整响应体。
+  if (hasBinaryBodyMode && !hasRequiresBody && (type === 'request' || type === 'response')) {
+    warnings.push('binary_body_mode=true 不会自动开启 requires_body；脚本若读取完整 body，请显式设置 requires_body=true')
   }
 
   let legacyTrigger
@@ -2413,7 +2553,14 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
       legacyTrigger = `cron ${JSON.stringify(cronExpression)}`
     }
   } else if (/^network-changed$/i.test(trigger)) {
-    legacyTrigger = 'network-changed'
+    if (targetApp === 'surge-module' || targetApp === 'shadowrocket-module') {
+      legacyTrigger = 'event event-name=network-changed'
+    } else {
+      legacyTrigger = 'network-changed'
+      if (targetApp === 'stash-stoverride') {
+        warnings.push('network-changed 在 Stash 中没有等价触发器，已保留为诊断项')
+      }
+    }
   } else if (/^generic$/i.test(trigger)) {
     legacyTrigger = 'generic'
   } else {
