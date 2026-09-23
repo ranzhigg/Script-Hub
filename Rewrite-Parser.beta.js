@@ -261,6 +261,7 @@ let loonSgArg = [] //转换为 Loon 时实际需要保留的参数
 let surgeRuleToggleArgs = new Map() //Surge 用行首 # 注释控制脚本启停的参数
 let argumentKeyRenameMap = new Map() //Surge 模板参数名 -> 脚本实际读取的 $argument key
 let loonV2Warnings = [] //Loon v2 转换时无法完全表达的能力
+let loonV2NormalizedLines = new Set() //已归一化的 Loon v2 行，用于保留可转换的 Generic Script
 
 let hnaddMethod = '%APPEND%'
 let fheaddMethod = '%APPEND%'
@@ -407,6 +408,7 @@ if (binaryInfo != null && binaryInfo.length > 0) {
       }
       if (loonV2?.line) {
         x = loonV2.line
+        loonV2NormalizedLines.add(x)
         if (loonV2.warnings?.length > 0) {
           loonV2Warnings.push(`${_x} → ${loonV2.warnings.join('；')}`)
         }
@@ -1606,7 +1608,7 @@ if (binaryInfo != null && binaryInfo.length > 0) {
                     jsarg
                 )
           } else if (/request|response|generic/.test(jstype) && (isSurgeiOS || isShadowrocket)) {
-            ;/^generic\s/.test(ori)
+            ;/^generic\s/.test(ori) && !loonV2NormalizedLines.has(ori)
               ? otherRule.push(ori)
               : script.push(
                   mark +
@@ -2277,8 +2279,8 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
   // 没有 v2 Action 的旧语法交给原有解析器处理。
   if (!actionMatch) return null
 
-  if (type === 'generic') {
-    return { unsupported: true, reason: '当前 Surge/Shadowrocket/Stash 输出没有 Generic Script 对应项' }
+  if (type === 'generic' && targetApp !== 'surge-module') {
+    return { unsupported: true, reason: '当前仅实现 Surge Generic Script 输出' }
   }
 
   const openIndex = source.indexOf('(', actionMatch.index)
@@ -2373,6 +2375,8 @@ function normalizeLoonV2ScriptLine(line, targetApp) {
     }
   } else if (/^network-changed$/i.test(trigger)) {
     legacyTrigger = 'network-changed'
+  } else if (/^generic$/i.test(trigger)) {
+    legacyTrigger = 'generic'
   } else {
     return { unsupported: true, reason: '无法识别的 Loon v2 触发器' }
   }
