@@ -260,6 +260,7 @@ let sgArg = [] //surge模块参数
 let loonSgArg = [] //转换为 Loon 时实际需要保留的参数
 let surgeRuleToggleArgs = new Map() //Surge 用行首 # 注释控制脚本启停的参数
 let argumentKeyRenameMap = new Map() //Surge 模板参数名 -> 脚本实际读取的 $argument key
+let loonV2Warnings = [] //Loon v2 转换时无法完全表达的能力
 
 let hnaddMethod = '%APPEND%'
 let fheaddMethod = '%APPEND%'
@@ -394,6 +395,22 @@ if (binaryInfo != null && binaryInfo.length > 0) {
     //剔除被注释的重写
     if (delNoteSc == true && /^#/.test(x) && !/^#!/.test(x)) {
       x = ''
+    }
+
+    // Loon 3.5.1+ 的 Script v2 先归一化为旧脚本格式，复用现有跨平台解析器。
+    // 输出到 Loon 时保留原始新语法，避免新旧语法之间来回转换造成信息损失。
+    if (!isLooniOS && (fromType === 'loon-plugin' || fromType === 'all-module')) {
+      const loonV2 = normalizeLoonV2ScriptLine(x, targetApp)
+      if (loonV2?.unsupported) {
+        otherRule.push(`${_x} [Loon v2: ${loonV2.reason}]`)
+        continue
+      }
+      if (loonV2?.line) {
+        x = loonV2.line
+        if (loonV2.warnings?.length > 0) {
+          loonV2Warnings.push(`${_x} → ${loonV2.warnings.join('；')}`)
+        }
+      }
     }
 
     let flags = {}
@@ -1966,17 +1983,33 @@ ${providers}
   eval(evJsmodi)
   eval(evUrlmodi)
 
+  const loonV2WarningText =
+    loonV2Warnings.length > 0 ? `Loon v2 转换提示:\n${loonV2Warnings.join('\n')}` : ''
+
   otherRule = (otherRule[0] || '') && `${app}不支持以下内容:\n${otherRule.join('\n')}`
 
   notBuildInPolicy =
     (notBuildInPolicy[0] || '') && `不是${app}内置策略且未指定策略的规则:\n${notBuildInPolicy.join('\n')}`
 
   shNotify(otherRule)
+  shNotify(loonV2WarningText)
   shNotify(notBuildInPolicy)
 
   if (openMsgHtml) {
     result = {
-      body: (JS_NAME + '\n\n' + inBox + '\n\n' + outBox + '\n\n' + otherRule + '\n\n' + notBuildInPolicy).replace(
+      body: (
+        JS_NAME +
+        '\n\n' +
+        inBox +
+        '\n\n' +
+        outBox +
+        '\n\n' +
+        otherRule +
+        '\n\n' +
+        loonV2WarningText +
+        '\n\n' +
+        notBuildInPolicy
+      ).replace(
         /\n{2,}/g,
         '\n\n'
       ),
@@ -2040,6 +2073,316 @@ function getArgArr(str) {
 function stripWrapQuote(str) {
   str = `${str ?? ''}`.trim()
   return /^".*"$/.test(str) || /^'.*'$/.test(str) ? str.slice(1, -1) : str
+}
+
+function findLoonV2ClosingParen(str, openIndex) {
+  let quote = ''
+  let escaped = false
+  let depth = 0
+  for (let i = openIndex; i < str.length; i++) {
+    const char = str[i]
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === quote) {
+        quote = ''
+      }
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char
+      continue
+    }
+    if (char === '(') {
+      depth++
+    } else if (char === ')') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+function splitLoonV2TopLevel(str, sep = ',') {
+  const arr = []
+  let current = ''
+  let quote = ''
+  let escaped = false
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i]
+    if (quote) {
+      current += char
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === quote) {
+        quote = ''
+      }
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char
+      current += char
+      continue
+    }
+    if (char === '{') braceDepth++
+    if (char === '}') braceDepth = Math.max(0, braceDepth - 1)
+    if (char === '[') bracketDepth++
+    if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1)
+    if (char === '(') parenDepth++
+    if (char === ')') parenDepth = Math.max(0, parenDepth - 1)
+    if (char === sep && braceDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
+      arr.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  arr.push(current.trim())
+  return arr
+}
+
+function splitFirstLoonV2TopLevel(str, sep) {
+  const parts = splitLoonV2TopLevel(str, sep)
+  return [parts[0] || '', parts.slice(1).join(sep).trim()]
+}
+
+function unwrapLoonV2String(value) {
+  const raw = `${value ?? ''}`.trim()
+  if (raw.length < 2) return null
+  const quote = raw[0]
+  if (!['"', "'", '`'].includes(quote) || raw[raw.length - 1] !== quote) return null
+  return raw
+    .slice(1, -1)
+    .replace(/\\(["'`\\])/g, '$1')
+}
+
+function readLoonV2Regex(value) {
+  const raw = `${value ?? ''}`.trim()
+  if (!raw.startsWith('/')) return { reason: 'URL 条件右值必须是正则字面量' }
+
+  let escaped = false
+  let closing = -1
+  for (let i = 1; i < raw.length; i++) {
+    const char = raw[i]
+    if (char === '/' && !escaped) {
+      closing = i
+      break
+    }
+    if (escaped) {
+      escaped = false
+    } else if (char === '\\') {
+      escaped = true
+    }
+  }
+  if (closing === -1) return { reason: 'URL 正则缺少结束分隔符 /' }
+
+  const pattern = raw.slice(1, closing)
+  const flags = raw.slice(closing + 1)
+  if (/\s+(?:&&|\|\|)\s+/.test(flags)) {
+    return { reason: 'URL 条件包含方法、状态码、Header 或额外逻辑条件，当前无法等价转换' }
+  }
+  if (!/^[ims]*$/.test(flags) || new Set(flags).size !== flags.length) {
+    return { reason: '仅支持 Loon v2 的 i、m、s 正则标记' }
+  }
+  if (/[\r\n]/.test(pattern) || /[ \t]/.test(pattern)) {
+    return { reason: 'URL 正则包含空格，当前旧格式解析器无法安全承载' }
+  }
+
+  const modifiers = flags
+    .split('')
+    .map(flag => flag)
+    .join('')
+  return { pattern: modifiers ? `(?${modifiers})${pattern}` : pattern }
+}
+
+function normalizeLoonV2Template(value, targetApp) {
+  const raw = `${value ?? ''}`.trim()
+  const matched = raw.match(/^\$\{\s*([^{}]+?)\s*\}$/)
+  if (!matched) return null
+  const key = matched[1].trim()
+  return targetApp == 'surge-module' || targetApp == 'shadowrocket-module' ? `{{{${key}}}}` : `{${key}}`
+}
+
+function normalizeLoonV2Boolean(value, targetApp) {
+  const raw = `${value ?? ''}`.trim()
+  const template = normalizeLoonV2Template(raw, targetApp)
+  if (template) return template
+  if (/^(true|false)$/i.test(raw)) return raw.toLowerCase()
+  return null
+}
+
+function normalizeLoonV2Timeout(value, targetApp) {
+  const raw = `${value ?? ''}`.trim()
+  const template = normalizeLoonV2Template(raw, targetApp)
+  if (template) return template
+  const scalar = unwrapLoonV2String(raw) ?? raw
+  if (!/^\d+(?:\.\d+)?$/.test(scalar) || Number(scalar) <= 0) return null
+  return scalar
+}
+
+function normalizeLoonV2Argument(value) {
+  const raw = `${value ?? ''}`.trim()
+  if (!raw) return ''
+
+  const stringValue = unwrapLoonV2String(raw)
+  if (stringValue != null) return JSON.stringify(stringValue)
+
+  if (/^\{[\s\S]*\}$/.test(raw)) {
+    const keys = splitLoonV2TopLevel(raw.slice(1, -1))
+      .filter(Boolean)
+      .map(item => item.match(/^\$\{\s*([^{}]+?)\s*\}$/)?.[1]?.trim() || '')
+    if (keys.length === 0 || keys.some(key => !key)) return null
+    if (new Set(keys).size !== keys.length) return null
+    return `[${keys.map(key => `{${key}}`).join(',')}]`
+  }
+
+  return null
+}
+
+function parseLoonV2UrlCondition(condition) {
+  const matched = `${condition ?? ''}`.trim().match(/^\$\{\s*url\s*\}\s*~=\s*([\s\S]+)$/)
+  if (!matched) return { reason: '目前只转换单一 ${url} ~= /正则/ 条件' }
+  return readLoonV2Regex(matched[1])
+}
+
+function parseLoonV2Options(value) {
+  const options = []
+  const seen = new Set()
+  for (const item of splitLoonV2TopLevel(`${value ?? ''}`)) {
+    if (!item) continue
+    const [rawKey, rawValue] = splitFirstLoonV2TopLevel(item, '=')
+    const key = rawKey.trim()
+    if (!key || !rawValue || seen.has(key)) return { reason: `with 中的字段无效或重复：${key || item}` }
+    seen.add(key)
+    options.push({ key, value: rawValue.trim() })
+  }
+  return { options }
+}
+
+function normalizeLoonV2ScriptLine(line, targetApp) {
+  const source = `${line ?? ''}`.trim()
+  if (!source || /^(#|;|\/\/)/.test(source)) return null
+
+  const typeMatch = source.match(/^(request|response|cron|network-changed|generic)\b/i)
+  if (!typeMatch) return null
+  const type = typeMatch[1].toLowerCase()
+  const actionMatch = /\bthen\s+script\s*\(/i.exec(source)
+  // 没有 v2 Action 的旧语法交给原有解析器处理。
+  if (!actionMatch) return null
+
+  if (type === 'generic') {
+    return { unsupported: true, reason: '当前 Surge/Shadowrocket/Stash 输出没有 Generic Script 对应项' }
+  }
+
+  const openIndex = source.indexOf('(', actionMatch.index)
+  const closeIndex = findLoonV2ClosingParen(source, openIndex)
+  if (closeIndex === -1) return { unsupported: true, reason: 'script(...) 缺少结束括号' }
+
+  const trigger = source.slice(0, actionMatch.index).trim()
+  const tail = source.slice(closeIndex + 1).trim()
+  if (tail && !/^with\b/i.test(tail)) {
+    return { unsupported: true, reason: 'script(...) 后存在无法识别的内容' }
+  }
+
+  const actionParts = splitLoonV2TopLevel(source.slice(openIndex + 1, closeIndex))
+  if (actionParts.length > 2 || !actionParts[0]) {
+    return { unsupported: true, reason: 'script(...) 只支持固定脚本路径和一个可选参数' }
+  }
+
+  const jsurl = unwrapLoonV2String(actionParts[0])
+  if (jsurl == null || !jsurl.trim()) {
+    return { unsupported: true, reason: '脚本路径必须是固定字符串' }
+  }
+
+  const jsarg = actionParts.length === 2 ? normalizeLoonV2Argument(actionParts[1]) : ''
+  if (jsarg == null) {
+    return { unsupported: true, reason: '暂只支持字符串参数或插件对象参数 {${name}, ...}' }
+  }
+
+  const optionsText = tail ? tail.replace(/^with\s+/i, '').trim() : ''
+  const parsedOptions = parseLoonV2Options(optionsText)
+  if (parsedOptions.reason) return { unsupported: true, reason: parsedOptions.reason }
+
+  const warnings = []
+  const legacyOptions = []
+  for (const option of parsedOptions.options) {
+    const { key, value } = option
+    if (key === 'tag') {
+      const tag = unwrapLoonV2String(value)
+      if (tag == null) return { unsupported: true, reason: 'tag 必须是固定字符串' }
+      legacyOptions.push(`tag=${tag}`)
+    } else if (key === 'img_url') {
+      const imgUrl = unwrapLoonV2String(value)
+      if (imgUrl == null) return { unsupported: true, reason: 'img_url 必须是固定字符串' }
+      legacyOptions.push(`img-url=${imgUrl}`)
+      warnings.push(`img_url 在 ${targetApp} 输出中没有对应字段，已忽略`)
+    } else if (key === 'timeout') {
+      const timeout = normalizeLoonV2Timeout(value, targetApp)
+      if (timeout == null) return { unsupported: true, reason: 'timeout 必须是正数或动态数字参数' }
+      legacyOptions.push(`timeout=${timeout}`)
+    } else if (key === 'enable') {
+      const enable = normalizeLoonV2Boolean(value, targetApp)
+      if (enable == null) return { unsupported: true, reason: 'enable 必须是 Boolean 或动态 Boolean 参数' }
+      legacyOptions.push(`enable=${enable}`)
+    } else if (key === 'debug') {
+      const debug = normalizeLoonV2Boolean(value, targetApp)
+      if (debug == null) return { unsupported: true, reason: 'debug 必须是 Boolean 或动态 Boolean 参数' }
+      warnings.push(`debug 在 ${targetApp} 输出中没有等价字段，已忽略`)
+    } else if (key === 'requires_body' || key === 'binary_body_mode') {
+      if (type !== 'request' && type !== 'response') {
+        return { unsupported: true, reason: `${key} 只适用于 Request/Response Script` }
+      }
+      if (/^\$\{\s*[^{}]+?\s*\}$/.test(value)) {
+        return { unsupported: true, reason: `${key} 必须是固定 Boolean，不能引用动态参数` }
+      }
+      const flag = normalizeLoonV2Boolean(value, targetApp)
+      if (flag == null) return { unsupported: true, reason: `${key} 必须是 Boolean` }
+      legacyOptions.push(`${key === 'requires_body' ? 'requires-body' : 'binary-body-mode'}=${flag}`)
+    } else {
+      return { unsupported: true, reason: `暂不支持 with 字段：${key}` }
+    }
+  }
+
+  let legacyTrigger
+  if (type === 'request' || type === 'response') {
+    const triggerMatch = trigger.match(new RegExp(`^${type}\\s+if\\s+([\\s\\S]+)$`, 'i'))
+    if (!triggerMatch) return { unsupported: true, reason: `${type} 缺少 if 条件` }
+    const condition = parseLoonV2UrlCondition(triggerMatch[1])
+    if (condition.reason) return { unsupported: true, reason: condition.reason }
+    legacyTrigger = `${type === 'request' ? 'http-request' : 'http-response'} ${condition.pattern}`
+  } else if (type === 'cron') {
+    const cronMatch = trigger.match(/^cron\s+([\s\S]+)$/i)
+    if (!cronMatch) return { unsupported: true, reason: 'cron 缺少 Cron 表达式' }
+    const cronValue = cronMatch[1].trim()
+    const cronTemplate = normalizeLoonV2Template(cronValue, targetApp)
+    if (cronTemplate) {
+      legacyTrigger = `cron ${cronTemplate}`
+    } else {
+      const cronExpression = unwrapLoonV2String(cronValue)
+      if (cronExpression == null || !cronExpression.trim()) {
+        return { unsupported: true, reason: 'Cron 表达式必须是固定字符串或动态参数' }
+      }
+      legacyTrigger = `cron ${JSON.stringify(cronExpression)}`
+    }
+  } else if (/^network-changed$/i.test(trigger)) {
+    legacyTrigger = 'network-changed'
+  } else {
+    return { unsupported: true, reason: '无法识别的 Loon v2 触发器' }
+  }
+
+  const options = legacyOptions.length > 0 ? `, ${legacyOptions.join(', ')}` : ''
+  const argument = jsarg ? `, argument=${jsarg}` : ''
+  return {
+    line: `${legacyTrigger} script-path=${jsurl}${options}${argument}`,
+    warnings,
+  }
 }
 
 function splitTopLevel(str, sep = ',') {
