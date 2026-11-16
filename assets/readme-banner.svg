@@ -1,0 +1,64 @@
+<svg width="1600" height="420" viewBox="0 0 1600 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Script Hub</title>
+  <desc id="desc">A colorful animated banner for Script Hub, a cross-client script and rule converter.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1600" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1020"/>
+      <stop offset="0.52" stop-color="#171B3B"/>
+      <stop offset="1" stop-color="#10182A"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="280" y1="40" x2="1330" y2="370" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6C63FF"/>
+      <stop offset="0.5" stop-color="#00D4FF"/>
+      <stop offset="1" stop-color="#FF72C6"/>
+    </linearGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="38"/>
+    </filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="round">
+      <rect width="1600" height="420" rx="36"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <rect width="1600" height="420" fill="url(#background)"/>
+
+    <circle cx="250" cy="64" r="150" fill="#6C63FF" fill-opacity="0.28" filter="url(#blur)">
+      <animate attributeName="cx" values="250;340;250" dur="9s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="64;110;64" dur="11s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="1390" cy="340" r="170" fill="#00D4FF" fill-opacity="0.18" filter="url(#blur)">
+      <animate attributeName="cx" values="1390;1290;1390" dur="10s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="340;290;340" dur="8s" repeatCount="indefinite"/>
+    </circle>
+
+    <path d="M-80 310C180 140 350 420 620 250C890 80 1020 280 1280 150C1430 75 1540 90 1690 150" stroke="url(#accent)" stroke-opacity="0.32" stroke-width="3">
+      <animate attributeName="d" dur="12s" repeatCount="indefinite" values="M-80 310C180 140 350 420 620 250C890 80 1020 280 1280 150C1430 75 1540 90 1690 150;M-80 250C180 360 380 100 620 280C860 440 1070 140 1280 245C1430 310 1530 220 1690 100;M-80 310C180 140 350 420 620 250C890 80 1020 280 1280 150C1430 75 1540 90 1690 150"/>
+    </path>
+    <path d="M-80 350C190 210 390 450 650 300C920 145 1070 330 1300 215C1450 140 1550 160 1690 210" stroke="white" stroke-opacity="0.08" stroke-width="2"/>
+
+    <g filter="url(#shadow)">
+      <rect x="96" y="88" width="116" height="116" rx="28" fill="#FFFFFF" fill-opacity="0.11" stroke="white" stroke-opacity="0.22"/>
+      <path d="M131 122H178C187 122 194 129 194 138V171C194 180 187 187 178 187H131C122 187 115 180 115 171V138C115 129 122 122 131 122Z" fill="url(#accent)"/>
+      <path d="M133 141H176M133 154H164M133 167H153" stroke="white" stroke-width="7" stroke-linecap="round"/>
+      <circle cx="181" cy="180" r="11" fill="#171B3B" stroke="white" stroke-width="4"/>
+      <path d="M176 180L180 184L187 175" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <text x="264" y="154" fill="white" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="68" font-weight="800" letter-spacing="-2">SCRIPT HUB</text>
+    <text x="270" y="214" fill="#D8E1FF" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="27" font-weight="500" letter-spacing="2">RULES  ·  REWRITES  ·  SCRIPT CONVERSION</text>
+    <rect x="270" y="258" width="262" height="6" rx="3" fill="url(#accent)">
+      <animate attributeName="width" values="180;330;262" dur="5s" repeatCount="indefinite"/>
+    </rect>
+    <text x="270" y="310" fill="#AAB7D9" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="22">跨客户端配置适配 · Built for the proxy-app ecosystem</text>
+
+    <g opacity="0.8">
+      <circle cx="1320" cy="95" r="5" fill="#FF72C6"><animate attributeName="r" values="4;8;4" dur="3s" repeatCount="indefinite"/></circle>
+      <circle cx="1370" cy="130" r="4" fill="#00D4FF"><animate attributeName="r" values="3;7;3" dur="4s" repeatCount="indefinite"/></circle>
+      <circle cx="1430" cy="82" r="3" fill="#6C63FF"><animate attributeName="r" values="2;6;2" dur="3.5s" repeatCount="indefinite"/></circle>
+    </g>
+  </g>
+</svg>
