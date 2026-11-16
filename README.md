@@ -23,7 +23,7 @@ An adapter toolkit for the proxy-app ecosystem — convert rules, rewrites and s
 <p>
   <a href="#快速开始--quick-start">快速开始</a> ·
   <a href="#支持范围--support-matrix">支持范围</a> ·
-  <a href="#loon-script-v2-beta">Loon Script v2</a> ·
+  <a href="#loon-script-v2">Loon Script v2</a> ·
   <a href="#社区--community">社区</a>
 </p>
 
@@ -55,7 +55,7 @@ Script Hub keeps configuration migration practical: convert rules, rewrites, mod
 | QX Rewrite | Surge · Shadowrocket · Loon · Stash | 常用重写规则跨端转换 / Cross-client rewrite conversion |
 | Surge Module | Loon · Stash | 模块内容与参数适配 / Module and argument adaptation |
 | Loon Plugin | Surge · Shadowrocket · Stash | 插件结构转换 / Plugin conversion |
-| Loon Script v2 **(Beta)** | Surge · Egern · Shadowrocket · Stash · Loon | 保留 Loon 原生 v2 语法 / Preserve native Loon v2 syntax |
+| Loon Script v2 | Surge · Egern · Shadowrocket · Stash · Loon | 正式版已包含已验证能力，Beta 继续迭代 / Stable includes validated support; Beta continues evolving |
 | QX · Surge · Loon · Shadowrocket · Clash 规则集 | Surge · Shadowrocket · Stash · Loon | 规则集解析与目标格式输出 / Rule-set parsing and serialization |
 | QX Script | Surge Script | 兼容性转换 / Compatibility conversion |
 | 纯文本 / Plain text | 参数修改 · 高级操作 | 适合远程模块的轻量调整 / Lightweight remote-content editing |
@@ -84,11 +84,11 @@ Script Hub keeps configuration migration practical: convert rules, rewrites, mod
 
 The current Stable line includes the tested Beta capabilities, while Stable and Beta remain separate maintenance lines. Stable modules use the stable runtime files; Beta modules continue to use the `*.beta.js` runtime and remain the place for new capability testing.
 
-## Loon Script v2 (Beta)
+## Loon Script v2
 
-Beta 版本支持 Loon 3.5.1+ Script v2 的 `request`、`response`、`cron`、`network-changed` 和 `generic` 触发器，并将可映射的 `timeout`、`enable`、`requires_body`、`binary_body_mode` 与脚本参数带到目标格式。
+当前正式版已包含经过验证的 Loon 3.5.1+ Script v2 转换能力，支持 `request`、`response`、`cron`、`network-changed` 和 `generic` 触发器，并将可映射的 `timeout`、`enable`、`requires_body`、`binary_body_mode` 与脚本参数带到目标格式。Beta 版本继续用于新能力和兼容性改进的验证。
 
-The Beta parser supports Loon 3.5.1+ Script v2 triggers — `request`, `response`, `cron`, `network-changed` and `generic` — together with representable timeouts, enable states, body flags and script arguments.
+The Stable parser now includes the validated Loon 3.5.1+ Script v2 support: `request`, `response`, `cron`, `network-changed` and `generic` triggers, together with representable timeouts, enable states, body flags and script arguments. The Beta parser remains the line for continued capability and compatibility testing.
 
 兼容性边界：WASM、加密逻辑和脚本正文不会被解密或改写；无法等价表达的条件或参数会给出提示，不会静默丢失。Beta 解析器也避免使用旧版 iOS JavaScriptCore 不支持的正则后行断言，改善 iOS 15/部分 iOS 16 环境的启动兼容性。稳定版与 Beta 版均以官方 `main` 的对应文件为准；客户端缓存仍需单独刷新。
 
