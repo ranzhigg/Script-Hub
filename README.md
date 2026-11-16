@@ -71,15 +71,28 @@ Script Hub keeps configuration migration practical: convert rules, rewrites, mod
 - 🧬 **脚本适配**：将可表达的脚本逻辑映射到目标客户端；目标不支持时保留诊断信息。
 - 🌐 **自托管**：支持本地预览、Node.js 服务和 Docker 部署，适合个人或团队维护。
 
+## 正式版与测试版 · Stable vs Beta
+
+当前正式版已经完成经过验证的 Beta 能力合并，但两条维护线仍然保持清晰分离：
+
+| 发布线 | 入口 | 定位 |
+| --- | --- | --- |
+| **Stable / 正式版** | `script-hub.js`、`rule-parser.js`、`script-converter.js`、`Rewrite-Parser.js` 及稳定模块 | 面向日常使用，优先保证兼容性与稳定性 |
+| **Beta / 测试版** | `*.beta.js` 及 `modules/script-hub.beta.*` | 继续承载新能力验证，单独测试、单独维护 |
+
+也就是说，稳定模块继续调用稳定脚本，Beta 模块继续调用 Beta 脚本；这次合并是稳定化当前能力，不会停止 Beta 后续迭代。正式版与 Beta 的差异应以各自模块入口和文件名为准。
+
+The current Stable line includes the tested Beta capabilities, while Stable and Beta remain separate maintenance lines. Stable modules use the stable runtime files; Beta modules continue to use the `*.beta.js` runtime and remain the place for new capability testing.
+
 ## Loon Script v2 (Beta)
 
 Beta 版本支持 Loon 3.5.1+ Script v2 的 `request`、`response`、`cron`、`network-changed` 和 `generic` 触发器，并将可映射的 `timeout`、`enable`、`requires_body`、`binary_body_mode` 与脚本参数带到目标格式。
 
 The Beta parser supports Loon 3.5.1+ Script v2 triggers — `request`, `response`, `cron`, `network-changed` and `generic` — together with representable timeouts, enable states, body flags and script arguments.
 
-兼容性边界：WASM、加密逻辑和脚本正文不会被解密或改写；无法等价表达的条件或参数会给出提示，不会静默丢失。Beta 解析器也避免使用旧版 iOS JavaScriptCore 不支持的正则后行断言，改善 iOS 15/部分 iOS 16 环境的启动兼容性。
+兼容性边界：WASM、加密逻辑和脚本正文不会被解密或改写；无法等价表达的条件或参数会给出提示，不会静默丢失。Beta 解析器也避免使用旧版 iOS JavaScriptCore 不支持的正则后行断言，改善 iOS 15/部分 iOS 16 环境的启动兼容性。稳定版与 Beta 版均以官方 `main` 的对应文件为准；客户端缓存仍需单独刷新。
 
-Compatibility boundary: WASM, encrypted logic and script bodies are not decrypted or rewritten. When a target cannot express a source feature, Script Hub reports it instead of silently dropping it. The Beta parser also avoids RegExp lookbehind so older iOS JavaScriptCore environments can start normally.
+Compatibility boundary: WASM, encrypted logic and script bodies are not decrypted or rewritten. When a target cannot express a source feature, Script Hub reports it instead of silently dropping it. The Beta parser also avoids RegExp lookbehind so older iOS JavaScriptCore environments can start normally. Use the corresponding Stable or Beta module entry when testing a client.
 
 ### 本地验证 · Local validation
 
@@ -113,7 +126,7 @@ For a service process, use `pnpm service`; Docker users can build from the inclu
 
 ### 文档与生态 · Docs & ecosystem
 
-- 📖 [使用文档 / Documentation](https://github.com/ranzhigg/Script-Hub/wiki)
+- 📖 [使用文档 / Documentation](https://github.com/Script-Hub-Org/Script-Hub/wiki)
 - 🧰 [Surge 模块工具 / Surge module tools](https://github.com/Script-Hub-Org/Script-Hub/wiki/%E7%9B%B8%E5%85%B3%E7%94%9F%E6%80%81:-Surge-%E6%A8%A1%E5%9D%97%E5%B7%A5%E5%85%B7)
 - 🖥️ [全服务器版（测试中）/ Full-server edition (testing)](https://github.com/Script-Hub-Org/Script-Hub/wiki/%E5%85%A8%E6%9C%8D%E5%8A%A1%E5%99%A8%E7%89%88(%E6%B5%8B%E8%AF%95%E4%B8%AD))
 
@@ -127,14 +140,28 @@ For a service process, use `pnpm service`; Docker users can build from the inclu
 
 ## 致谢 · Acknowledgements
 
-感谢所有上游项目、脚本作者和社区贡献者。特别感谢 [_@Chavy_](https://github.com/chavyleung) 的 [Env.js](https://github.com/chavyleung/scripts)、[_@KOP-XIAO_](https://github.com/KOP-XIAO) 的 [resource-parser.js](https://github.com/KOP-XIAO/Quantumult/raw/master/Scripts/resource-parser.js)，以及参与 Script Hub 前端、解析器和图标生态建设的每一位贡献者。
+感谢所有上游项目、脚本作者和社区贡献者。原有致谢与链接完整保留：
 
-Thanks to the upstream projects, script authors and community contributors who make this ecosystem possible. See the original project history for the complete acknowledgement list.
+Powered by [_@Chavy‘s_](https://github.com/chavyleung) [Env.js](https://github.com/chavyleung/scripts)  
+原脚本作者 @小白脸  
+脚本修改[_@chengkongyiban_](https://github.com/chengkongyiban)  
+大量借鉴[_@KOP-XIAO_](https://github.com/KOP-XIAO)佬的[resource-parser.js](https://github.com/KOP-XIAO/Quantumult/raw/master/Scripts/resource-parser.js)  
+感谢[_@xream_](https://github.com/xream) 佬提供与 [_@keywos_](https://github.com/keywos) 修改 `本项目 Script Hub 网页前端`, [replace-header.js](https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-header.js)，[echo-response.js](https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/echo-response.js)，[script-converter.js](https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/script-converter.js)  
+感谢[_@mieqq_](https://github.com/mieqq) 佬提供的[replace-body.js](https://github.com/mieqq/mieqq/raw/master/replace-body.js), 本项目中已进行修改  
+感谢[_@Maasea_](https://github.com/Maasea) 佬的指导  
+项目 logo 感谢 [_@Toperlock_](https://github.com/Toperlock)  
+插件图标用的 [_@Keikinn_](https://github.com/KeiKinn) 佬的 [StickerOnScreen](https://github.com/KeiKinn/StickerOnScreen)项目，以及 [_@Toperlock_](https://github.com/Toperlock) 佬的 [QX 图标库](https://github.com/Toperlock/Quantumult/tree/main/icon)项目，感谢
+
+Thanks to the upstream projects, script authors and community contributors who make this ecosystem possible.
 
 ## 许可证 · License
 
 本项目基于 [GNU General Public License v3.0](LICENSE) 发布。
 Released under the [GNU General Public License v3.0](LICENSE).
+
+## 赞助 · Support
+
+[Patreon](https://www.patreon.com/scripthuborg)
 
 <div align="center">
 
