@@ -63,6 +63,7 @@ Script Hub keeps configuration migration practical: convert rules, rewrites, mod
 支持的目标客户端包括 **Surge、Loon、Shadowrocket、Stash、Egern、LanceX**；具体能力以目标客户端的语法边界和转换提示为准。
 
 ## 核心功能 · Features
+• 正式版已包含经过验证的 Loon 3.5.1+ Script v2 转换能力；Beta 继续用于新能力和兼容性测试
 
 - 🧭 **一站式转换**：选择输入类型和目标类型，生成可直接使用的配置结果。
 - 🛠️ **高级操作**：编辑任意文本、修改参数，适配需要自定义 `argument` 的远程模块。
@@ -101,6 +102,7 @@ npm run test:loon-v2
 ```
 
 ## 快速开始 · Quick Start
+正式版和 Beta 版都支持 Loon Script v2 的 `request`、`response`、`cron`、`network-changed`、`generic` 触发器，可转换为 Surge/Egern、Shadowrocket 和 Stash；转换为 Loon 时保留原生 v2 语法。正式版面向日常使用，Beta 继续用于后续能力验证。
 
 ### 在线使用 · Use online
 
@@ -113,6 +115,7 @@ npm run test:loon-v2
 3. Paste a URL or text, generate the result and import it using the client-specific action.
 
 ### 本地预览 · Run locally
+稳定版与 Beta 版均使用官方 `main` 中对应的解析器文件，回归测试：
 
 ```bash
 git clone https://github.com/ranzhigg/Script-Hub.git
